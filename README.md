@@ -28,7 +28,7 @@ Example:
 </CertificateConfiguration>
 ```
 
-WebRoot folder is folder, where http01 challenge files will be placed (WebRoot\.well-known\acme-challenge).
+WebRoot folder is folder, where http01 challenge files will be placed (WebRoot\\.well-known\acme-challenge).
 
 If IisSiteName is specified, client will attempt to install the certificate to the PC's store and set it up for all https bindings of given IIS site.
 

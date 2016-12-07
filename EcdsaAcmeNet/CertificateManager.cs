@@ -94,7 +94,7 @@ namespace EcdsaAcmeNet
 
             var gen = new ECKeyPairGenerator();
             var secureRandom = new SecureRandom();
-            var keyGenParam = new KeyGenerationParameters(secureRandom, Utils.KeySize);
+            var keyGenParam = new KeyGenerationParameters(secureRandom, signer.KeySize);
             gen.Init(keyGenParam);
             var kp = gen.GenerateKeyPair();
 
@@ -139,7 +139,6 @@ namespace EcdsaAcmeNet
                 var crtPemFile = Path.Combine(certificatePath, dnsNames[0] + "-crt.pem");
                 var chainPemFile = Path.Combine(certificatePath, dnsNames[0] + "-chain.pem");
 
-                var cp = CertificateProvider.GetProvider();
                 using (var fs = new FileStream(keyPemFile, FileMode.Create))
                 {
                     var bytes = Encoding.UTF8.GetBytes(pemKeyString.ToString());
@@ -203,8 +202,6 @@ namespace EcdsaAcmeNet
                         store.Save(filestream, password.ToCharArray(), new SecureRandom());
                     }
                 }
-
-                cp.Dispose();
             }
         }
     }

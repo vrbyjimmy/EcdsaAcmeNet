@@ -33,3 +33,13 @@ WebRoot folder is folder, where http01 challenge files will be placed (WebRoot\\
 If IisSiteName is specified, client will attempt to install the certificate to the PC's store and set it up for all https bindings of given IIS site.
 
 All generated certificate files will be placed to the same directory as given XML config.
+
+#IIS configuration
+
+Make sure that your IIS site can serve extensionless files. You should have following lines in your web.config.
+
+```xml
+<staticContent>
+  <mimeMap fileExtension="." mimeType="text/html" />
+</staticContent>
+```

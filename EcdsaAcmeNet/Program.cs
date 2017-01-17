@@ -190,11 +190,6 @@ namespace EcdsaAcmeNet
                     // if running as windows service, certificates gets issued on first day of every month
                     if (isService && ((lastIssuedDate.Month == date.Month) && (lastIssuedDate.Year == date.Year)))
                     {
-                        if (log != null)
-                        {
-                            log.Info("here");
-                        }
-
                         continue;
                     }
 

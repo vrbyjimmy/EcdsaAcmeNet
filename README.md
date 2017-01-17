@@ -8,6 +8,10 @@ Simple [ACME](https://github.com/ietf-wg-acme/acme/) client based on [ACMESharp]
 
 -m : Manual mode - Manual delivery of ACME http01 challenge. Client will ask to upload each file for challenge before requesting server response.
 
+-i : install as windows service
+
+-u : uninstall windows service
+
 #Configuration
 Client expects XML configuration file for each domain in Configuration directory placed in application's folder.
 
@@ -43,3 +47,6 @@ Make sure that your IIS site can serve extensionless files. You should have foll
   <mimeMap fileExtension="." mimeType="text/html" />
 </staticContent>
 ```
+
+When installed as windows service new certificates are issued on first day in month.
+All info about service doings gets logged into ServiceEcdsaAcmeNet application log.

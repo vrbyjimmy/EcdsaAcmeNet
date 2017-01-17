@@ -12,6 +12,8 @@ Simple [ACME](https://github.com/ietf-wg-acme/acme/) client based on [ACMESharp]
 
 -u : uninstall windows service
 
+If you run it without any parameters, it tries to run as windows service and you might get an error message indicating that it must first be installed as service. To run this as simple commandline some parameters must be specified, -p preferably.
+
 #Configuration
 Client expects XML configuration file for each domain in Configuration directory placed in application's folder.
 

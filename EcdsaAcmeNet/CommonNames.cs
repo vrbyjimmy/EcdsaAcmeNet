@@ -9,5 +9,7 @@
         public const string Alias = "Alias";
         public const string WebRoot = "WebRoot";
         public const string IisSiteName = "IisSiteName";
+        public const string LastIssuedDate = "LastIssuedDate";
+        public const string Password = "Password";
     }
 }

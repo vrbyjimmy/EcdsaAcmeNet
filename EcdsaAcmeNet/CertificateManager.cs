@@ -24,7 +24,7 @@ namespace EcdsaAcmeNet
 {
     public class CertificateManager
     {
-        public static string GetIssuerCertificate(string certificatePath, CertificateRequest certificate, Options options)
+        public static string GetIssuerCertificate(string certificatePath, CertificateRequest certificate, bool isTest)
         {
             var linksEnum = certificate.Links;
             if (linksEnum != null)
@@ -38,7 +38,7 @@ namespace EcdsaAcmeNet
                     {
                         using (var web = new WebClient())
                         {
-                            var uri = new Uri(new Uri(options.Test ? Utils.TestBaseUri : Utils.BaseUri), upLink.Uri);
+                            var uri = new Uri(new Uri(isTest ? Utils.TestBaseUri : Utils.BaseUri), upLink.Uri);
                             web.DownloadFile(uri, temporaryFileName);
                         }
 
@@ -85,7 +85,7 @@ namespace EcdsaAcmeNet
             return null;
         }
 
-        public static void GetCertificate(EcdsaSigner signer, AcmeClient client, IList<string> dnsNames, string pfxFile, string password, Options options)
+        public static void GetCertificate(EcdsaSigner signer, AcmeClient client, IList<string> dnsNames, string pfxFile, string password, bool isTest)
         {
             if (!dnsNames.Any())
             {
@@ -170,7 +170,7 @@ namespace EcdsaAcmeNet
                     target.Write(bytes, 0, bytes.Length);
                 }
 
-                var isuPemFile = GetIssuerCertificate(certificatePath, certRequ, options);
+                var isuPemFile = GetIssuerCertificate(certificatePath, certRequ, isTest);
 
                 using (FileStream intermediate = new FileStream(isuPemFile, FileMode.Open),
                     certificate = new FileStream(crtPemFile, FileMode.Open),

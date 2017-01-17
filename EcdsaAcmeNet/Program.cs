@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration.Install;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -7,6 +9,7 @@ using System.Reflection;
 using System.Runtime.Remoting.Messaging;
 using System.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.ServiceProcess;
 using System.Threading;
 using System.Xml.Linq;
 using ACMESharp;
@@ -20,7 +23,7 @@ namespace EcdsaAcmeNet
 {
     public class Options
     {
-        [Option('p', "password", Required = true, HelpText = "Password for PFX files.")]
+        [Option('p', "password", HelpText = "Password for PFX files.")]
         public string Password { get; set; }
 
         [Option('m', "manual", HelpText = "Manual upload of challenge files.")]
@@ -28,6 +31,12 @@ namespace EcdsaAcmeNet
 
         [Option('t', "test", HelpText = "Test mode - staging acme will be used.")]
         public bool Test { get; set; }
+
+        [Option('i', "install", HelpText = "Installs as windows service.")]
+        public bool Install { get; set; }
+
+        [Option('u', "uninstall", HelpText = "Uninstalls windows service.")]
+        public bool Uninstall { get; set; }
 
         [ParserState]
         public IParserState LastParserState { get; set; }
@@ -44,13 +53,57 @@ namespace EcdsaAcmeNet
         private static void Main(string[] args)
         {
             var options = new Options();
-            if (!Parser.Default.ParseArguments(args, options))
+            if ((args == null) || !args.Any() || !Parser.Default.ParseArguments(args, options))
             {
+                ServiceBase[] ServicesToRun;
+                ServicesToRun = new ServiceBase[]
+                {
+                    new EcdsaAcmeNetService()
+                };
+                ServiceBase.Run(ServicesToRun);
+
+                return;
+            }
+
+            if (options.Install)
+            {
+                ManagedInstallerClass.InstallHelper(new[] {Assembly.GetExecutingAssembly().Location});
+
+                return;
+            }
+
+            if (options.Uninstall)
+            {
+                try
+                {
+                    EventLog.Delete("ServiceEcdsaAcmeNet");
+                    EventLog.DeleteEventSource("ServiceEcdsaAcmeNet");
+                }
+                catch
+                {
+                    // supress
+                }
+
+                try
+                {
+                    ManagedInstallerClass.InstallHelper(new[] { "/u", Assembly.GetExecutingAssembly().Location });
+                }
+                catch
+                {
+                    // supress
+                }
+
                 return;
             }
 
             var password = options.Password;
             var isManualFtpUpload = options.Manual;
+
+            ProcessConfigrationFolder(password, isManualFtpUpload, options.Test, false, null);
+        }
+
+        public static void ProcessConfigrationFolder(string password, bool isManualFtpUpload, bool isTest, bool isService, ILog log)
+        {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls | SecurityProtocolType.Tls11 |SecurityProtocolType.Tls12;
 
             var configurationFolder = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Configuration");
@@ -62,10 +115,16 @@ namespace EcdsaAcmeNet
             var configurationXmls = Directory.GetFiles(configurationFolder, "*.xml", SearchOption.AllDirectories);
             if (!configurationXmls.Any())
             {
+                if (log != null)
+                {
+                    log.Info("No certificate configuration found! " + configurationFolder);
+                }
                 Console.WriteLine("No certificate configuration found!");
 
                 return;
             }
+
+            var date = DateTime.Now.Date;
 
             foreach (var configurationPath in Directory.GetFiles(configurationFolder, "*.xml", SearchOption.AllDirectories))
             {
@@ -74,6 +133,12 @@ namespace EcdsaAcmeNet
                     var xmlDoc = XDocument.Load(configurationPath);
                     if (xmlDoc.Root.Name != CommonNames.CertificateConfiguration)
                     {
+                        if (log != null)
+                        {
+                            log.Info("No certificate configuration found! " + configurationFolder);
+                        }
+                        Console.WriteLine("No certificate configuration found!");
+
                         continue;
                     }
 
@@ -98,11 +163,51 @@ namespace EcdsaAcmeNet
                     var pfxfile = Path.Combine(Path.GetDirectoryName(configurationPath), certname + ".pfx");
                     var iisSiteName = xmlDoc.Root.Elements(CommonNames.IisSiteName).First().Value;
 
+                    var lastIssuedDateElement = xmlDoc.Root.Elements(CommonNames.LastIssuedDate).FirstOrDefault();
+                    if (lastIssuedDateElement == null)
+                    {
+                        lastIssuedDateElement = new XElement(CommonNames.LastIssuedDate, DateTime.MinValue.Ticks.ToString());
+                        xmlDoc.Root.Add(lastIssuedDateElement);
+                    }
+
+                    var passwordElement = xmlDoc.Root.Elements(CommonNames.Password).FirstOrDefault();
+                    if ((passwordElement == null) || string.IsNullOrWhiteSpace(password))
+                    {
+                        password = Guid.NewGuid().ToString("N");
+                        if (log != null)
+                        {
+                            log.Info("Password not received. Generated this one: " + password);
+                        }
+                        Console.WriteLine("Password not received. Generated this one: " + password);
+                    }
+                    else
+                    {
+                        password = passwordElement.Value;
+                    }
+
+                    var lastIssuedDate = new DateTime(long.Parse(lastIssuedDateElement.Value));
+
+                    // if running as windows service, certificates gets issued on first day of every month
+                    if (isService && ((lastIssuedDate.Month == date.Month) && (lastIssuedDate.Year == date.Year)))
+                    {
+                        if (log != null)
+                        {
+                            log.Info("here");
+                        }
+
+                        continue;
+                    }
+
+                    if (log != null)
+                    {
+                        log.Info("Certificate being issued for " + domain);
+                    }
+
                     using (var signer = new EcdsaSigner())
                     {
                         signer.Init();
 
-                        using (var client = new AcmeClient(new Uri(options.Test ? Utils.TestBaseUri : Utils.BaseUri), new AcmeServerDirectory(), signer))
+                        using (var client = new AcmeClient(new Uri(isTest ? Utils.TestBaseUri : Utils.BaseUri), new AcmeServerDirectory(), signer))
                         {
                             client.Init();
                             client.GetDirectory(true);
@@ -172,6 +277,10 @@ namespace EcdsaAcmeNet
 
                                     if (authzState.Status == "invalid")
                                     {
+                                        if (log != null)
+                                        {
+                                            log.Error("ACME challenge failed for domain: " + domain);
+                                        }
                                         Console.WriteLine("ACME challenge failed for domain: " + domain);
                                     }
 
@@ -190,6 +299,10 @@ namespace EcdsaAcmeNet
                                         }
                                         catch (Exception ex)
                                         {
+                                            if (log != null)
+                                            {
+                                                log.Error(ex.Message, ex);
+                                            }
                                             Console.WriteLine(ex.Message);
                                         }
                                     }
@@ -198,18 +311,26 @@ namespace EcdsaAcmeNet
 
                             if (authStatus.All(x => x.Status == "valid"))
                             {
-                                CertificateManager.GetCertificate(signer, client, dnsIdentifiers, pfxfile, password, options);
+                                CertificateManager.GetCertificate(signer, client, dnsIdentifiers, pfxfile, password, isTest);
                             }
                         }
                     }
 
                     if (!File.Exists(pfxfile))
                     {
+                        if (log != null)
+                        {
+                            log.Error("PFX file not found: " + pfxfile);
+                        }
                         Console.WriteLine("PFX file not found: " + pfxfile);
 
                         continue;
                     }
 
+                    if (log != null)
+                    {
+                        log.Info("Certificate issued: " + pfxfile);
+                    }
                     Console.WriteLine("Certificate issued: " + pfxfile);
 
                     if (!string.IsNullOrWhiteSpace(iisSiteName))
@@ -229,14 +350,24 @@ namespace EcdsaAcmeNet
                                 pass.AppendChar(c);
                             }
 
-                            var certificate = new X509Certificate2(pfxfile, pass);
+                            var certificate = new X509Certificate2(pfxfile, pass, 
+                                X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable);
+                            certificate.FriendlyName = certname;
                             store.Add(certificate);
+                            if (log != null)
+                            {
+                                log.Info("Certificate:" + pfxfile + " added to store.");
+                            }
                             Console.WriteLine("Certificate:" + pfxfile + " added to store.");
 
                             foreach (var sslBinding in sslBindings)
                             {
                                 sslBinding.CertificateHash = certificate.GetCertHash();
                                 sslBinding.CertificateStoreName = store.Name;
+                                if (log != null)
+                                {
+                                    log.Info("Certificate: " + pfxfile + " set up for binding " + sslBinding.Host);
+                                }
                                 Console.WriteLine("Certificate: " + pfxfile + " set up for binding " + sslBinding.Host);
                             }
 
@@ -245,9 +376,16 @@ namespace EcdsaAcmeNet
                             store.Close();
                         }
                     }
+
+                    lastIssuedDateElement.Value = DateTime.Now.Ticks.ToString();
+                    xmlDoc.Save(configurationPath);
                 }
                 catch (Exception e)
                 {
+                    if (log != null)
+                    {
+                        log.Error(e.Message, e);
+                    }
                     Console.WriteLine(e.Message);
                 }
             }

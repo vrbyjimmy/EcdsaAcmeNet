@@ -12,6 +12,8 @@ Simple [ACME](https://github.com/ietf-wg-acme/acme/) client based on [ACMESharp]
 
 -u : uninstall windows service
 
+-k KeySize : KeySize for generated certificate. Defaults to 256. Supported are 256, 384.
+
 If you run it without any parameters, it tries to run as windows service and you might get an error message indicating that it must first be installed as service. To run this as simple commandline some parameters must be specified, -p preferably.
 
 #Configuration

@@ -6,8 +6,6 @@ namespace EcdsaAcmeNet
 {
     public static class Utils
     {
-        public const int KeySize = 256;
-
         public const string BaseUri = "https://acme-v01.api.letsencrypt.org/";
         public const string TestBaseUri = "https://acme-staging.api.letsencrypt.org/directory";
 

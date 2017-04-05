@@ -12,15 +12,9 @@ namespace EcdsaAcmeNet
         private object jwk;
         private ECDsaCng cryptoProvider;
 
-        public int KeySize
-        {
-            get { return keySize; }
-            set { keySize = value; }
-        }
-
         public string JwsAlg
         {
-            get { return "ES" + this.KeySize; }
+            get { return "ES256"; }
         }
 
         public void Dispose()
@@ -34,7 +28,7 @@ namespace EcdsaAcmeNet
 
         public void Init()
         {
-            this.cryptoProvider = new ECDsaCng(this.KeySize);
+            this.cryptoProvider = new ECDsaCng(256);
         }
 
         public void Save(Stream stream)
@@ -63,7 +57,7 @@ namespace EcdsaAcmeNet
 
                 this.jwk = (object) new
                 {
-                    crv = "P-" + this.KeySize,
+                    crv = "P-256",
                     kty = "EC",
                     x = Utils.Base64UrlEncode(x.ToByteArray().Reverse().ToArray()),
                     y = Utils.Base64UrlEncode(y.ToByteArray().Reverse().ToArray())
@@ -95,7 +89,5 @@ namespace EcdsaAcmeNet
         {
             return this.cryptoProvider.SignData(raw);
         }
-
-        private int keySize = Utils.KeySize;
     }
 }

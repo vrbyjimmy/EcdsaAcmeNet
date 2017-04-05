@@ -11,5 +11,6 @@
         public const string IisSiteName = "IisSiteName";
         public const string LastIssuedDate = "LastIssuedDate";
         public const string Password = "Password";
+        public const string KeySize = "KeySize";
     }
 }

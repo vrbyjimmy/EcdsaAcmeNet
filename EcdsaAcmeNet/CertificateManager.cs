@@ -85,7 +85,7 @@ namespace EcdsaAcmeNet
             return null;
         }
 
-        public static void GetCertificate(EcdsaSigner signer, AcmeClient client, IList<string> dnsNames, string pfxFile, string password, bool isTest)
+        public static void GetCertificate(AcmeClient client, IList<string> dnsNames, string pfxFile, string password, bool isTest, int keySize)
         {
             if (!dnsNames.Any())
             {
@@ -94,11 +94,11 @@ namespace EcdsaAcmeNet
 
             var gen = new ECKeyPairGenerator();
             var secureRandom = new SecureRandom();
-            var keyGenParam = new KeyGenerationParameters(secureRandom, signer.KeySize);
+            var keyGenParam = new KeyGenerationParameters(secureRandom, keySize);
             gen.Init(keyGenParam);
             var kp = gen.GenerateKeyPair();
 
-            var sigFactory = new Asn1SignatureFactory("SHA" + signer.KeySize + "WITHECDSA", kp.Private);
+            var sigFactory = new Asn1SignatureFactory("SHA" + keySize + "WITHECDSA", kp.Private);
 
             var name = new X509Name("CN=" + dnsNames[0]);
 

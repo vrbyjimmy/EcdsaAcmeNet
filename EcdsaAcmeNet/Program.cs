@@ -38,6 +38,9 @@ namespace EcdsaAcmeNet
         [Option('u', "uninstall", HelpText = "Uninstalls windows service.")]
         public bool Uninstall { get; set; }
 
+        [Option('k', "keysize", HelpText = "Key size.", DefaultValue = 256)]
+        public int KeySize { get; set; }
+
         [ParserState]
         public IParserState LastParserState { get; set; }
 
@@ -98,11 +101,12 @@ namespace EcdsaAcmeNet
 
             var password = options.Password;
             var isManualFtpUpload = options.Manual;
+            var keySize = options.KeySize;
 
-            ProcessConfigrationFolder(password, isManualFtpUpload, options.Test, false, null);
+            ProcessConfigrationFolder(password, isManualFtpUpload, options.Test, false, null, keySize);
         }
 
-        public static void ProcessConfigrationFolder(string password, bool isManualFtpUpload, bool isTest, bool isService, ILog log)
+        public static void ProcessConfigrationFolder(string password, bool isManualFtpUpload, bool isTest, bool isService, ILog log, int? keySize)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls | SecurityProtocolType.Tls11 |SecurityProtocolType.Tls12;
 
@@ -171,7 +175,7 @@ namespace EcdsaAcmeNet
                     }
 
                     var passwordElement = xmlDoc.Root.Elements(CommonNames.Password).FirstOrDefault();
-                    if ((passwordElement == null) || string.IsNullOrWhiteSpace(password))
+                    if (((passwordElement == null) || string.IsNullOrWhiteSpace(passwordElement.Value)) && string.IsNullOrWhiteSpace(password))
                     {
                         password = Guid.NewGuid().ToString("N");
                         if (log != null)
@@ -180,9 +184,24 @@ namespace EcdsaAcmeNet
                         }
                         Console.WriteLine("Password not received. Generated this one: " + password);
                     }
-                    else
+                    else if ((passwordElement != null) && !string.IsNullOrWhiteSpace(passwordElement.Value))
                     {
                         password = passwordElement.Value;
+                    }
+
+                    var keySizeElement = xmlDoc.Root.Elements(CommonNames.KeySize).FirstOrDefault();
+                    if (((keySizeElement == null) || string.IsNullOrWhiteSpace(keySizeElement.Value)) && (keySize == null))
+                    {
+                        keySize = 256;
+                        if (log != null)
+                        {
+                            log.Info("KeySize not received. Set to 256.");
+                        }
+                        Console.WriteLine("KeySize not received. Set to 256.");
+                    }
+                    else if ((keySizeElement != null) && !string.IsNullOrWhiteSpace(keySizeElement.Value))
+                    {
+                        keySize = int.Parse(keySizeElement.Value);
                     }
 
                     var lastIssuedDate = new DateTime(long.Parse(lastIssuedDateElement.Value));
@@ -306,7 +325,7 @@ namespace EcdsaAcmeNet
 
                             if (authStatus.All(x => x.Status == "valid"))
                             {
-                                CertificateManager.GetCertificate(signer, client, dnsIdentifiers, pfxfile, password, isTest);
+                                CertificateManager.GetCertificate(client, dnsIdentifiers, pfxfile, password, isTest, keySize ?? 256);
                             }
                         }
                     }

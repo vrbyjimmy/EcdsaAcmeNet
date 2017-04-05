@@ -37,7 +37,7 @@ namespace EcdsaAcmeNet
                     {
                         try
                         {
-                            Program.ProcessConfigrationFolder(null, false, false, true, log);
+                            Program.ProcessConfigrationFolder(null, false, false, true, log, null);
                         }
                         catch (Exception e)
                         {

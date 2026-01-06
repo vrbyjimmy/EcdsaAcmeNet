@@ -1,4 +1,10 @@
-﻿using System;
+﻿using Certes;
+using Certes.Acme;
+using Certes.Acme.Resource;
+using CommandLine;
+using log4net;
+using Microsoft.Web.Administration;
+using System;
 using System.Collections.Generic;
 using System.Configuration.Install;
 using System.Diagnostics;
@@ -6,18 +12,13 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
-using System.Runtime.Remoting.Messaging;
+using System.Runtime.CompilerServices;
 using System.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.ServiceProcess;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Xml.Linq;
-using ACMESharp;
-using ACMESharp.ACME;
-using CommandLine;
-using CommandLine.Text;
-using log4net;
-using Microsoft.Web.Administration;
 
 namespace EcdsaAcmeNet
 {
@@ -38,25 +39,17 @@ namespace EcdsaAcmeNet
         [Option('u', "uninstall", HelpText = "Uninstalls windows service.")]
         public bool Uninstall { get; set; }
 
-        [Option('k', "keysize", HelpText = "Key size.", DefaultValue = 256)]
-        public int KeySize { get; set; }
-
-        [ParserState]
-        public IParserState LastParserState { get; set; }
-
-        [HelpOption]
-        public string GetUsage()
-        {
-            return HelpText.AutoBuild(this, current => HelpText.DefaultParsingErrorsHandler(this, current));
-        }
+        [Option('k', "keysize", HelpText = "Key size.")]
+        public int KeySize { get; set; } = 256;
     }
     
     internal class Program
     {
-        private static void Main(string[] args)
+        private static async Task Main(string[] args)
         {
-            var options = new Options();
-            if ((args == null) || !args.Any() || !Parser.Default.ParseArguments(args, options))
+            Options options;
+            ParserResult<Options> parserResult;
+            if ((args == null) || !args.Any() || (parserResult = Parser.Default.ParseArguments<Options>(args)).Errors.Any())
             {
                 ServiceBase[] ServicesToRun;
                 ServicesToRun = new ServiceBase[]
@@ -67,6 +60,8 @@ namespace EcdsaAcmeNet
 
                 return;
             }
+
+            options = parserResult.Value;
 
             if (options.Install)
             {
@@ -103,20 +98,36 @@ namespace EcdsaAcmeNet
             var isManualFtpUpload = options.Manual;
             var keySize = options.KeySize;
 
-            ProcessConfigrationFolder(password, isManualFtpUpload, options.Test, false, null, keySize);
+            await ProcessConfigrationFolder(password, isManualFtpUpload, options.Test, false, null, keySize);
         }
 
-        public static void ProcessConfigrationFolder(string password, bool isManualFtpUpload, bool isTest, bool isService, ILog log, int? keySize)
+        private static void RemoveReadOnlyAttribute(string path)
         {
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls | SecurityProtocolType.Tls11 |SecurityProtocolType.Tls12;
+            foreach (var file in System.IO.Directory.GetFiles(path, "*.*", SearchOption.AllDirectories))
+            {
+                var attributes = File.GetAttributes(file);
+
+                if ((attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                {
+                    attributes = attributes & ~FileAttributes.ReadOnly;
+                    File.SetAttributes(file, attributes);
+                }
+            }
+        }
+
+        public static async Task ProcessConfigrationFolder(string password, bool isManualFtpUpload, bool isTest, bool isService, ILog log, int? keySize)
+        { 
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
 
             var configurationFolder = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Configuration");
-            if (!Directory.Exists(configurationFolder))
+            if (!System.IO.Directory.Exists(configurationFolder))
             {
-                Directory.CreateDirectory(configurationFolder);
+                System.IO.Directory.CreateDirectory(configurationFolder);
             }
 
-            var configurationXmls = Directory.GetFiles(configurationFolder, "*.xml", SearchOption.AllDirectories);
+            RemoveReadOnlyAttribute(configurationFolder);
+
+            var configurationXmls = System.IO.Directory.GetFiles(configurationFolder, "*.xml", SearchOption.AllDirectories);
             if (!configurationXmls.Any())
             {
                 if (log != null)
@@ -130,7 +141,7 @@ namespace EcdsaAcmeNet
 
             var date = DateTime.Now.Date;
 
-            foreach (var configurationPath in Directory.GetFiles(configurationFolder, "*.xml", SearchOption.AllDirectories))
+            foreach (var configurationPath in System.IO.Directory.GetFiles(configurationFolder, "*.xml", SearchOption.AllDirectories))
             {
                 try
                 {
@@ -147,12 +158,6 @@ namespace EcdsaAcmeNet
                     }
 
                     var email = xmlDoc.Root.Elements(CommonNames.Email).First().Value;
-
-                    if (!email.StartsWith("mailto:"))
-                    {
-                        email = "mailto:" + email;
-                    }
-
                     var domain = xmlDoc.Root.Elements(CommonNames.Domain).First().Value;
                     var webRootPath = xmlDoc.Root.Elements(CommonNames.WebRoot).First().Value;
                     var aliasesElement = xmlDoc.Root.Elements(CommonNames.Aliases).First();
@@ -217,118 +222,146 @@ namespace EcdsaAcmeNet
                         log.Info("Certificate being issued for " + domain);
                     }
 
-                    using (var signer = new EcdsaSigner())
+                    var source = isTest ? WellKnownServers.LetsEncryptStagingV2 : WellKnownServers.LetsEncryptV2;
+
+                    AcmeContext acme = null;
+
+                    try
                     {
-                        signer.Init();
-
-                        using (var client = new AcmeClient(new Uri(isTest ? Utils.TestBaseUri : Utils.BaseUri), new AcmeServerDirectory(), signer))
+                        var folder = Path.GetDirectoryName(configurationPath);
+                        if (!File.Exists(Path.Combine(folder, "account.pem")))
                         {
-                            client.Init();
-                            client.GetDirectory(true);
-                            client.Register(new[] {email}); // creates registration for given email with new ECC key
-                            client.UpdateRegistration(true, true); // accepts let's encrypt terms of use
+                            var tmp = new AcmeContext(source);
+                            await tmp.NewAccount(email, true);
 
-                            var dnsIdentifiers = new List<string>();
-                            dnsIdentifiers.AddRange(aliases);
-                            var authStatus = new List<AuthorizationState>();
-
-                            foreach (var dnsIdentifier in dnsIdentifiers)
-                            {
-                                var authzState = client.AuthorizeIdentifier(dnsIdentifier);
-                                var challenge = client.DecodeChallenge(authzState, AcmeProtocol.CHALLENGE_TYPE_HTTP);
-                                var httpChallenge = challenge.Challenge as HttpChallenge;
-
-                                // We need to strip off any leading '/' in the path
-                                var filePath = httpChallenge.FilePath;
-                                if (filePath.StartsWith("/", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    filePath = filePath.Substring(1);
-                                }
-
-                                var answerPath =
-                                    Environment.ExpandEnvironmentVariables(Path.Combine(webRootPath, filePath));
-                                if (!Directory.Exists(Path.GetDirectoryName(answerPath)))
-                                {
-                                    Directory.CreateDirectory(Path.GetDirectoryName(answerPath));
-                                }
-
-                                // Protection against extensionless file exception
-                                if (string.IsNullOrWhiteSpace(Path.GetExtension(answerPath)))
-                                {
-                                    answerPath += ".ean";
-                                }
-
-                                File.WriteAllText(answerPath, httpChallenge.FileContent);
-
-                                if (answerPath.EndsWith(".ean"))
-                                {
-                                    answerPath = answerPath.Replace(".ean", string.Empty);
-
-                                    File.Move(answerPath + ".ean", answerPath);
-                                }
-
-                                try
-                                {
-                                    authzState.Challenges = new[] {challenge};
-
-                                    if (isManualFtpUpload)
-                                    {
-                                        Console.WriteLine(string.Format("Deliver file {0} to your site hosting to folder .well-known\acme-challenge and hit any key.", Path.GetFileName(answerPath)));
-                                        Console.ReadLine();
-                                    }
-
-                                    client.SubmitChallengeAnswer(authzState, AcmeProtocol.CHALLENGE_TYPE_HTTP, true);
-
-                                    while (authzState.Status == "pending")
-                                    {
-                                        Thread.Sleep(1000);
-                                        var newAuthzState = client.RefreshIdentifierAuthorization(authzState);
-                                        if (newAuthzState.Status != "pending")
-                                        {
-                                            authzState = newAuthzState;
-                                        }
-                                    }
-
-                                    if (authzState.Status == "invalid")
-                                    {
-                                        if (log != null)
-                                        {
-                                            log.Error("ACME challenge failed for domain: " + domain);
-                                        }
-                                        Console.WriteLine("ACME challenge failed for domain: " + domain);
-                                    }
-
-                                    authStatus.Add(authzState);
-                                }
-                                finally
-                                {
-                                    if (authzState.Status == "valid")
-                                    {
-                                        try
-                                        {
-                                            if (File.Exists(answerPath))
-                                            {
-                                                File.Delete(answerPath);
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            if (log != null)
-                                            {
-                                                log.Error(ex.Message, ex);
-                                            }
-                                            Console.WriteLine(ex.Message);
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (authStatus.All(x => x.Status == "valid"))
-                            {
-                                CertificateManager.GetCertificate(client, dnsIdentifiers, pfxfile, password, isTest, keySize ?? 256);
-                            }
+                            var pemKey = tmp.AccountKey.ToPem();
+                            File.WriteAllText(Path.Combine(folder, "account.pem"), pemKey);
+                            
+                            acme = tmp;
+                        }
+                        else
+                        {
+                            var accountKey = KeyFactory.FromPem(File.ReadAllText(Path.Combine(folder, "account.pem")));
+                            var tmp = new AcmeContext(source, accountKey);
+                            await tmp.Account();
+                            
+                            acme = tmp;
                         }
                     }
+                    catch (Exception e)
+                    {
+                        if (log != null)
+                        {
+                            log.Error(e.Message, e);
+                        }
+
+                        continue;
+                    }
+
+                    var order = await acme.NewOrder(aliases);
+                    var isValid = false;
+
+                    Thread.Sleep(TimeSpan.FromSeconds(1));
+
+                    foreach (var authz in (await order.Authorizations()).Where(x => x != null).ToList())
+                    {
+                        isValid = true;
+
+                        if (authz.RetryAfter > 0)
+                        {
+                            Thread.Sleep(authz.RetryAfter);
+                        }
+                        else
+                        {
+                            Thread.Sleep(TimeSpan.FromSeconds(1));
+                        }
+
+                        var httpChallenge = await authz.Http();
+                        while (httpChallenge == null)
+                        {
+                            httpChallenge = await authz.Http();
+                            Thread.Sleep(TimeSpan.FromSeconds(1));
+                        }
+
+                        var keyAuthz = httpChallenge.KeyAuthz;
+
+                        var answerPath = Environment.ExpandEnvironmentVariables(Path.Combine(webRootPath, ".well-known", "acme-challenge", httpChallenge.Token));
+
+                        if (!isManualFtpUpload)
+                        {
+                            if (!System.IO.Directory.Exists(Path.GetDirectoryName(answerPath)))
+                            {
+                                System.IO.Directory.CreateDirectory(Path.GetDirectoryName(answerPath));
+                            }
+
+                            if (string.IsNullOrWhiteSpace(Path.GetExtension(answerPath)))
+                            {
+                                answerPath += ".softj";
+                            }
+
+                            File.WriteAllText(answerPath, keyAuthz);
+
+                            if (answerPath.EndsWith(".softj"))
+                            {
+                                answerPath = answerPath.Replace(".softj", string.Empty);
+
+                                if (File.Exists(answerPath))
+                                {
+                                    File.Delete(answerPath);
+                                }
+
+                                File.Move(answerPath + ".softj", answerPath);
+                            }
+
+                            Thread.Sleep(TimeSpan.FromSeconds(1));
+                        }
+
+                        if (isManualFtpUpload)
+                        {
+                            Console.WriteLine(string.Format("Deliver file {0} to your site hosting to folder .well-known\\acme-challenge and hit any key.", Path.GetFileName(answerPath)));
+                            Console.ReadLine();
+                        }
+
+                        var result = await httpChallenge.Validate();
+                        
+                        while (result == null ||
+                               result.Status == ChallengeStatus.Processing ||
+                               result.Status == ChallengeStatus.Pending)
+                        {
+                            result = await httpChallenge.Resource();
+
+                            Thread.Sleep(1000);
+                        }
+
+                        if (result.Status == ChallengeStatus.Invalid)
+                        {
+                            isValid = false;
+
+                            if (log != null)
+                            {
+                                log.Error("Failed to validate http01 challenge for " + authz.Location);
+                            }
+                            Console.WriteLine("Failed to validate http01 challenge for " + authz.Location);
+                        }
+                    }
+
+                    if (!isValid)
+                    {
+                        continue;
+                    }
+
+                    var privateKey = KeyFactory.NewKey(keySize == 256 ? KeyAlgorithm.ES256 : KeyAlgorithm.ES384);
+
+                    Thread.Sleep(TimeSpan.FromSeconds(1));
+
+                    var cert = await order.Generate(new CsrInfo
+                    {
+                        CommonName = aliases.First(),
+                    }, privateKey);
+
+                    var pfxBuilder = cert.ToPfx(privateKey);
+                    var pfx = pfxBuilder.Build(aliases.First(), password);
+                    File.WriteAllBytes(pfxfile, pfx);
 
                     if (!File.Exists(pfxfile))
                     {

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<CertificateConfiguration>  
+  <Email>domaincom@gmail.com</Email>
+  <Domain>domain.com</Domain>
+  <WebRoot>C:\Webs\DomainComWeb\WWWRoot</WebRoot>
+  <IisSiteName>DomainComWeb</IisSiteName>
+  <Password>EcdsaAcmeNet</Password>
+  <KeySize>384</KeySize>
+  <Aliases>
+    <Alias>domain.com</Alias>
+    <Alias>www.domain.com</Alias>
+  </Aliases>
+</CertificateConfiguration>

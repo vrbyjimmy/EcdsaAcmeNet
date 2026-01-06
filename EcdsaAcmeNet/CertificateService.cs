@@ -29,7 +29,7 @@ namespace EcdsaAcmeNet
             log.Info("Service started.");
             isAlive = true;
 
-            Task.Factory.StartNew(() =>
+            Task.Factory.StartNew(async () =>
             {
                 try
                 {
@@ -37,7 +37,7 @@ namespace EcdsaAcmeNet
                     {
                         try
                         {
-                            Program.ProcessConfigrationFolder(null, false, false, true, log, null);
+                            await Program.ProcessConfigrationFolder(null, false, false, true, log, null);
                         }
                         catch (Exception e)
                         {
